@@ -1,6 +1,7 @@
 import os
 
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
+from fastapi import HTTPException
 
 from .config import default_conf
 
@@ -20,6 +21,17 @@ async def send_email(subject, recipients, body_arg, template):
         subtype="html"
     )
 
-    conf = ConnectionConfig(**updated_conf)
-    fm = FastMail(conf)
-    await fm.send_message(message,  template_name=template)
+    try:
+        conf = ConnectionConfig(**updated_conf)
+        fm = FastMail(conf)
+        await fm.send_message(message,  template_name=template)
+    except ConnectionRefusedError as e:
+        raise HTTPException(
+            status_code=400, 
+            detail="Email server connection refused"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, 
+            detail=str(e)
+        )

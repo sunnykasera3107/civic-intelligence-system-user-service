@@ -15,6 +15,10 @@ class UserCreate(BaseModel):
     phone: INPhone
 
 
+class UserByID(BaseModel):
+    id: int
+
+
 class UserResponse(BaseModel):
     id: int
     name: str

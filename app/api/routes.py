@@ -165,6 +165,18 @@ def account(user: schema.Token, db: Session = Depends(get_db)):
     
     return existing_user
 
+@router.post("/get_user", response_model=schema.UserResponse)
+def get_user(user: schema.UserByID, db: Session = Depends(get_db)):
+    existing_user = db.query(User).filter(
+        User.id == user.id
+    ).first()
+
+    # Check if email not exists
+    if not existing_user:
+        raise HTTPException(status_code=401, detail="User not found with this id")
+    
+    return existing_user
+
 
 @router.get("/verify_email")
 async def verify_email(access_token: str, db: Session = Depends(get_db)):
