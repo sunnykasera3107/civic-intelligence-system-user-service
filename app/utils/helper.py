@@ -25,9 +25,10 @@ class Helper:
     @staticmethod
     def jwt_tokenize(data: dict) -> dict:
         to_encode = data.copy()
-        expery_minutes = os.getenv("TOKEN_EXPIRE") if "type" not in data else os.getenv("RESET_EXPIRE")
-        expiry = datetime.now() + timedelta(minutes=int(expery_minutes))
-        to_encode.update({"exp": expiry})
+        if "data" not in data:
+            expery_minutes = os.getenv("TOKEN_EXPIRE") if "type" not in data else os.getenv("RESET_EXPIRE")
+            expiry = datetime.now() + timedelta(minutes=int(expery_minutes))
+            to_encode.update({"exp": expiry})
         return jwt.encode(to_encode, os.getenv("SECRET_TOKEN"), algorithm=os.getenv("ALGORITHM"))
     
     @staticmethod

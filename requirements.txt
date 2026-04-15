@@ -6,3 +6,4 @@ psycopg2-binary
 bcrypt
 pydantic
 phonenumbers
+fastapi_mail
