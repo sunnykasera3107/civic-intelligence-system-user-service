@@ -44,13 +44,14 @@ POST /register
 URL: Base URL
 
 Request Body:
+```
 {
   "name": "John Doe",
   "email": "john@example.com",
   "password": "your_password",
   "phone": "your_phone_number"
 }
-
+```
 ---
 
 ### 2. Login User
@@ -59,11 +60,12 @@ POST /login
 URL: Base URL
 
 Request Body:
+```
 {
   "email": "john@example.com",
   "password": "your_password"
 }
-
+```
 ---
 
 ### 3. Verify Email
@@ -81,10 +83,11 @@ POST /forget
 URL: Base URL  
 
 Request Body:
+```
 {
   "email": "john@example.com"
 }
-
+```
 ---
 
 ### 5. Reset Password
@@ -93,11 +96,12 @@ POST /reset
 URL: Base URL  
 
 Request Body:
+```
 {
   "token": "reset_token_here",
   "password": "new_password"
 }
-
+```
 ---
 
 ### 7. Get Account Details by Token for token verification
@@ -106,11 +110,12 @@ POST /account
 URL: Base URL  
 
 Request Body:
+```
 {
   "access_token": "",
   "token_type": "bearer"
 }
-
+```
 Note: This endpoint may require authentication.
 
 ---
@@ -121,10 +126,11 @@ POST /get_user
 URL: Base URL  
 
 Request Body:
+```
 {
   "id": 1
 }
-
+```
 Note: This endpoint may require authentication.
 
 ---
