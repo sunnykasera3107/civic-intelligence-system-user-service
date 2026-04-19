@@ -1,8 +1,9 @@
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.services.database import schema
@@ -15,6 +16,7 @@ from app.utils.helper import Helper
 
 Base.metadata.create_all(bind=engine)
 router = APIRouter()
+_logger = logging.Logger(__name__)
 
 
 def get_db():
@@ -26,7 +28,11 @@ def get_db():
 
 
 @router.post("/register")
-async def register(user: schema.UserCreate, db: Session = Depends(get_db)):
+async def register(
+    user: schema.UserCreate, 
+    background_tasks: BackgroundTasks, 
+    db: Session = Depends(get_db)
+):
     # Check if email already exists
     existing_user = db.query(User).filter(User.email == user.email).first()
     if existing_user:
@@ -34,6 +40,7 @@ async def register(user: schema.UserCreate, db: Session = Depends(get_db)):
             status_code=400, 
             detail="Email already registered"
         )
+    
 
     # Hash password
     hashed_password = Helper.hash_password(user.password)
@@ -46,18 +53,25 @@ async def register(user: schema.UserCreate, db: Session = Depends(get_db)):
         phone=user.phone
     )
 
+    _logger.info(new_user)
+
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    await email_verification(new_user)
+    await email_service(
+        new_user, 
+        background_tasks, 
+        subject="Email Verification", 
+        type="verify"
+    )
 
     return {
         "message": "Account registered successfully"
     }
 
 
-@router.post("/login", response_model=schema.Token)
+@router.post("/login")
 def login(user: schema.UserLogin, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.email == user.email).first()
 
@@ -77,13 +91,22 @@ def login(user: schema.UserLogin, db: Session = Depends(get_db)):
 
     return {
         "access_token": access_token,
-        "token_type": "bearer"
+        "token_type": "bearer",
+        "user": {
+            "id": existing_user.id,
+            "email": existing_user.email,
+            "name": existing_user.name,
+            "phone": existing_user.phone,
+            "email_verified": existing_user.email_verified,
+            "phone_verified": existing_user.phone_verified
+        }
     }
 
 
-@router.post("/forget", response_model=schema.Token)
+@router.post("/forget")
 async def forget(
     user: schema.ForgotPasswordRequest, 
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     existing_user = db.query(User).filter(User.email == user.email).first()
@@ -93,21 +116,24 @@ async def forget(
         raise HTTPException(status_code=401, detail="Invalid email address")
     
     # Create Token
-    access_token = Helper.jwt_tokenize({
+    reset_token = Helper.jwt_tokenize({
         "type": "reset",
         "email": existing_user.email
     })
 
-    await send_email(
+    await email_service(
+        existing_user, 
+        background_tasks, 
+        type="reset", 
+        min=15, 
         subject="Reset Password",
-        recipients=[os.getenv("FROM_MAIL")],
         body_arg={
             "name": existing_user.name,
             "reset_link": f"{
-                os.getenv("BASE_URL")
-            }/verify_email?token={access_token}&type=bearer"
+                os.path.join(os.getenv("BASE_URL"), "reset_password")
+            }/{reset_token}"
         },
-        template="app/services/email/templates/forget_password.html"
+        template="forget_password.html"
     )
 
     return {
@@ -116,8 +142,11 @@ async def forget(
 
 
 @router.post("/reset")
-def reset(user: schema.ResetPasswordRequest, db: Session = Depends(get_db)):
-    data = Helper.jwt_detokenize(user.access_token)
+def reset(
+    user: schema.ResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    data = Helper.jwt_detokenize(user.reset_token)
 
     # Check if token is reset type token
     if data.get("type") != "reset":
@@ -165,6 +194,7 @@ def account(user: schema.Token, db: Session = Depends(get_db)):
     
     return existing_user
 
+
 @router.post("/get_user", response_model=schema.UserResponse)
 def get_user(user: schema.UserByID, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(
@@ -173,56 +203,101 @@ def get_user(user: schema.UserByID, db: Session = Depends(get_db)):
 
     # Check if email not exists
     if not existing_user:
-        raise HTTPException(status_code=401, detail="User not found with this id")
+        raise HTTPException(
+            status_code=401, 
+            detail="User not found with this id"
+        )
     
     return existing_user
 
 
-@router.get("/verify_email")
-async def verify_email(access_token: str, db: Session = Depends(get_db)):
+@router.get("/verify_email/{access_token}")
+async def verify_email(
+    access_token: str, 
+    db: Session = Depends(get_db)
+):
     data = Helper.jwt_detokenize(access_token)
     existing_user = db.query(User).filter(
         User.email == data.get("email")
     ).first()
-
-    # Check if token is not reset type token
-    if not existing_user or ("type" in data and data.get("type") != "reset"):
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    # Check if token is valid or expired
-    if data.get("exp") < time.time():
-        await email_verification(existing_user)
-        raise HTTPException(status_code=401, detail="Token expired")
-    
-    if existing_user.email_verified == True:
+    print(not existing_user ,
+        ("type" in data and data.get("type") != "verify"),
+        data.get("exp") < time.time())
+    if (
+        not existing_user 
+        or 
+        ("type" in data and data.get("type") != "verify")
+        or
+        data.get("exp") < time.time()
+    ):
         raise HTTPException(
             status_code=401, 
-            detail="Email is already verified"
+            detail=f"Invalid token. Login and click on verify email for new token."
         )
     
     existing_user.email_verified = True
     db.commit()
 
     return {
-        "message": "Your email address is verified."
+        "message": "Email is verified"
     }
 
 
-async def email_verification(user):
-    access_token = Helper.jwt_tokenize({
-        "id": user.id,
-        "email": user.email,
-        "exp": (datetime.now() + timedelta(minutes=(60*24)))
-    })
+@router.get("/send_verification_email/{id}")
+async def send_verification_email(
+    id: int, 
+    background_tasks: BackgroundTasks, 
+    db: Session = Depends(get_db)
+):
+    existing_user = db.query(User).filter(
+        User.id == id
+    ).first()
 
-    await send_email(
-        subject="Welcome to civic intelligent portal",
-        recipients=[os.getenv("FROM_MAIL")],
-        body_arg={
-            "name": user.name,
+    if not existing_user and not id:
+        raise HTTPException(
+            status_code=401, 
+            detail=f"User detail not found, login and try again."
+        )
+
+    await email_service(
+        existing_user, 
+        background_tasks, 
+        subject="Email Verification", 
+        type="verify"
+    )
+
+    return {
+        "message": "Reset email sent on your email address.",
+    }
+
+
+async def email_service(
+    user, 
+    background_tasks: BackgroundTasks, 
+    min: int = 1440, 
+    type: str = "bearer", 
+    subject: str = "Welcome!",
+    template: str = "registration.html",
+    body_arg: dict = None
+):
+    if not body_arg:
+        access_token = Helper.jwt_tokenize({
+            "id": user.id,
+            "email": user.email,
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=min),
+            "type": type
+        })
+        body_arg = {
+            "name": user.name, 
             "verification_link": f"{
-                os.getenv("BASE_URL")
-            }/verify_email?access_token={access_token}"
-        },
-        template="registration.html"
+                os.path.join(os.getenv("BASE_URL"), "verify_email")
+            }/{access_token}",
+        }
+
+    background_tasks.add_task(
+        send_email,
+        subject=subject,
+        recipients=[user.email],
+        body_arg=body_arg,
+        template=template
     )
