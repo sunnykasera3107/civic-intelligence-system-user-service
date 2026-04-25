@@ -2,9 +2,11 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 import logging
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
+from redis import Redis
 
 from app.services.database import schema
 from app.services.database.conn import SessionLocal, Base
@@ -17,7 +19,11 @@ from app.utils.helper import Helper
 Base.metadata.create_all(bind=engine)
 router = APIRouter()
 _logger = logging.Logger(__name__)
-
+rd = Redis(
+    host=os.getenv("REDIS_HOST"),
+    port=os.getenv("REDIS_PORT"),
+    decode_responses=True
+)
 
 def get_db():
     db = SessionLocal()
@@ -184,6 +190,11 @@ def account(user: schema.Token, db: Session = Depends(get_db)):
     if data.get("exp") < time.time():
         raise HTTPException(status_code=401, detail="Token expired")
 
+    key = f"user:{data.get("id")}"
+    if data.get("id") and rd.exists(key):        
+        user = json.loads(rd.getex(key))
+        return user
+
     existing_user = db.query(User).filter(
         User.email == data.get("email")
     ).first()
@@ -192,6 +203,16 @@ def account(user: schema.Token, db: Session = Depends(get_db)):
     if not existing_user:
         raise HTTPException(status_code=401, detail="Invalid email address")
     
+    key = f"user:{existing_user.id}"
+    user_data = {
+        "id": existing_user.id,
+        "name": existing_user.name,
+        "email": existing_user.email,
+        "email_verified": existing_user.email_verified,
+        "phone_verified": existing_user.phone_verified,
+        "phone": existing_user.phone
+    }
+    rd.setex(key, timedelta(minutes=int(os.getenv("TOKEN_EXPIRE"))), json.dumps(user_data))
     return existing_user
 
 

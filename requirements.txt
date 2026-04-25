@@ -1,9 +1,11 @@
 fastapi[standard]
 uvicorn[standard]
 httpx
-sqlalchemy
-psycopg2-binary 
+SQLAlchemy
+psycopg2-binary
 bcrypt
 pydantic
-phonenumbers
 fastapi_mail
+redis
+phonenumbers
+PyJWT
