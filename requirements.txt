@@ -9,3 +9,4 @@ fastapi_mail
 redis
 phonenumbers
 PyJWT
+geopy

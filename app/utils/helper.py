@@ -6,6 +6,9 @@ import bcrypt
 from fastapi import Depends, HTTPException
 import jwt
 from jwt.exceptions import InvalidTokenError
+from geopy.geocoders import Nominatim
+from geopy.distance import geodesic
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,4 +40,24 @@ class Helper:
             return jwt.decode(token, os.getenv("SECRET_TOKEN"), algorithms=[os.getenv("ALGORITHM")])
         except InvalidTokenError:
             raise HTTPException(status_code=401, detail="Invalid token")
-        
+    
+    @staticmethod
+    def get_address_from_coordinates(coords) -> dict:
+        geolocator = Nominatim(user_agent="civic-issue-app")
+        location = geolocator.reverse(f"{coords}", language="en", zoom=18)
+        if not location:
+            return {"error": "Address not found"}
+
+        addr = location.raw.get("address", {})
+
+        return {
+            "address": location.address,
+            "city": addr.get("city") or addr.get("town"),
+            "state": addr.get("state"),
+            "country": addr.get("country"),
+            "postcode": addr.get("postcode")
+        }
+    
+    @staticmethod
+    def get_distance_between(coord1, coord2):
+        return geodesic(coord1, coord2).km

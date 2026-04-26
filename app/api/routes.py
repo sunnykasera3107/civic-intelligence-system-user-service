@@ -77,6 +77,53 @@ async def register(
     }
 
 
+
+@router.post("/register-officer")
+async def register(
+    user: schema.OfficerCreate,
+    background_tasks: BackgroundTasks, 
+    db: Session = Depends(get_db)
+):  
+    # Check if email already exists
+    existing_user = db.query(User).filter(User.email == user.email).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=400, 
+            detail="Email already registered"
+        )
+    
+
+    coords = ",".join([str(user.latitude), str(user.longitude)])
+    location = Helper.get_address_from_coordinates(coords)
+
+    # Hash password
+    user.password = Helper.hash_password(user.password)
+    user = user.model_dump()
+    user['role'] = 2
+    user['city'] = location.get("city")
+   
+
+    # Create user
+    new_user = User(**user)
+
+    _logger.info(new_user)
+
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    await email_service(
+        new_user, 
+        background_tasks, 
+        subject="Email Verification", 
+        type="verify"
+    )
+
+    return {
+        "message": "Account registered successfully"
+    }
+
+
 @router.post("/login")
 def login(user: schema.UserLogin, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.email == user.email).first()
@@ -204,17 +251,68 @@ def account(user: schema.Token, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid email address")
     
     key = f"user:{existing_user.id}"
-    user_data = {
-        "id": existing_user.id,
-        "name": existing_user.name,
-        "email": existing_user.email,
-        "email_verified": existing_user.email_verified,
-        "phone_verified": existing_user.phone_verified,
-        "phone": existing_user.phone
-    }
-    rd.setex(key, timedelta(minutes=int(os.getenv("TOKEN_EXPIRE"))), json.dumps(user_data))
+    user_data = schema.UserResponse.model_validate(existing_user).model_dump_json()
+    rd.setex(key, timedelta(minutes=int(os.getenv("TOKEN_EXPIRE"))), user_data)
     return existing_user
 
+
+@router.post("/nearest_officer")
+async def get_user(
+    complaint_detail: schema.OfficerRequest, 
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    existing_user = db.query(User).filter(
+        User.id == complaint_detail.complainerId
+    ).first()
+
+    await email_service(
+        existing_user, 
+        background_tasks, 
+        type="complaint", 
+        min=15, 
+        subject="Your complaint registered",
+        body_arg={
+            "name": existing_user.name,
+            "complaint_link": f"{
+                os.path.join(os.getenv("BASE_URL"), "complaint")
+            }/{complaint_detail.complaintId}",
+            "contact_details": "A relavent officer will attand it soon."
+        },
+        template="complaint.html"
+    )
+
+    existing_users = db.query(User).filter(
+        User.city == complaint_detail.city,
+        User.departmentId == complaint_detail.departmentId,
+        User.role == 2
+    ).all()
+    coord1 = (complaint_detail.latitude, complaint_detail.longitude)
+    
+    for user in existing_users:
+        coord2 = (user.latitude, user.longitude)
+        distance = Helper.get_distance_between(coord1, coord2)
+        if user.arearange > distance:
+            # await email_service(
+            #     user, 
+            #     background_tasks, 
+            #     type="complaint", 
+            #     min=15, 
+            #     subject="New complaint registered",
+            #     body_arg={
+            #         "name": user.name,
+            #         "complaint_link": f"{
+            #             os.path.join(os.getenv("BASE_URL"), "complaint")
+            #         }/{complaint_detail.complaintId}",
+            #         "contact_details": f"Contact to {existing_user.name}<br>On {existing_user.phone} and {existing_user.email}"
+            #     },
+            #     template="complaint.html"
+            # )
+            return user
+    raise HTTPException(
+        status_code=404, 
+        detail="Related officer not found."
+    )
 
 @router.post("/get_user", response_model=schema.UserResponse)
 def get_user(user: schema.UserByID, db: Session = Depends(get_db)):

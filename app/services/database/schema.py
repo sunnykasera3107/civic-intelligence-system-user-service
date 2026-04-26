@@ -14,10 +14,29 @@ class UserCreate(BaseModel):
     password: str
     phone: INPhone
 
+class OfficerCreate(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+    phone: INPhone
+    departmentId: int
+    arearange: int
+    latitude: float
+    longitude: float
+
 
 class UserByID(BaseModel):
     id: int
 
+
+class OfficerRequest(BaseModel):
+    latitude: float
+    longitude: float
+    city: str
+    departmentId: int
+    complainerId: int
+    complaintId: int
+    
 
 class UserResponse(BaseModel):
     id: int
@@ -26,6 +45,13 @@ class UserResponse(BaseModel):
     phone: PhoneNumber
     email_verified: bool
     phone_verified: bool
+    role: int
+    departmentId: str | None = None
+    arearange: int | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    additional_info: str | None = None
+    city: str | None = None
 
     class Config:
         from_attributes = True
